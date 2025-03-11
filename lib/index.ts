@@ -1,0 +1,303 @@
+import type { z } from 'zod';
+
+/**
+ * Represents the result of an HTTP operation, containing either success data or an error
+ * @template T The type of the success data
+ */
+export type HttpResult<T> = { success: true; data: T } | { success: false; error: HttpError };
+
+/**
+ * Different types of errors that can occur during HTTP requests
+ * @property type - The category of the error
+ * @property message - Human-readable error message
+ * @property errors - Validation errors from Zod (only for validation errors)
+ * @property status - HTTP status code (only for response errors)
+ * @property data - Additional error data from the server (only for response errors)
+ */
+export type HttpError =
+  | { type: 'network'; message: string }
+  | { type: 'timeout'; message: string }
+  | { type: 'parse'; message: string }
+  | { type: 'validation'; message: string; errors: z.ZodError }
+  | { type: 'response'; message: string; status: number; data: unknown };
+
+interface RequestDetails {
+  method: string;
+  path: string;
+  data?: unknown;
+  params?: Record<string, string | number>;
+  query?: Record<string, string | number | boolean>;
+}
+
+/**
+ * Configuration options for setting up an HTTP client.
+ *
+ * @interface HttpConfig
+ * @property {string} endpoint - The base URL endpoint for all requests
+ * @property {number} [timeout] - Optional default timeout in milliseconds
+ * @property {Record<string, string>} [headers] - Optional default headers to include in all requests
+ */
+interface HttpConfig {
+  endpoint: string;
+  headers?: (details: RequestDetails) => Record<string, string>;
+  timeout?: number;
+}
+
+/**
+ * Configuration options for individual HTTP requests.
+ *
+ * @interface RequestConfig
+ * @template T - The expected response data type
+ * @property {number} [timeout] - Optional request-specific timeout in milliseconds
+ * @property {Record<string, string>} [headers] - Optional request-specific headers
+ * @property {z.ZodType<T>} [schema] - Optional Zod schema for response validation
+ * @property {FormData} [formData] - Optional form data to send with the request
+ * @property {Record<string, string | number | boolean>} [query] - Optional query parameters
+ */
+interface RequestConfig<T = unknown> {
+  timeout?: number;
+  headers?: Record<string, string>;
+  schema?: z.ZodType<T>;
+  formData?: FormData;
+  search?: Record<string, string | number | boolean>;
+}
+
+/**
+ * HTTP client for making API requests with type-safe error handling
+ * @example
+ * ```ts
+ * const http = new HttpClient({
+ *   endpoint: 'https://api.example.com',
+ *   auth: () => `Bearer ${AuthStore.getState().token}`
+ * });
+ *
+ * const getUser = async (id: string) => {
+ *   const result = await http.get(`/users/${id}`);
+ *
+ *   if (!result.success) {
+ *     console.error(formatHttpError(result.error));
+ *     return null;
+ *   }
+ *
+ *   return result.data;
+ * };
+ * ```
+ */
+export class HttpClient {
+  private baseURL: string;
+  private config: Required<Pick<HttpConfig, 'timeout' | 'headers'>>;
+
+  constructor(config: HttpConfig) {
+    this.baseURL = config.endpoint;
+    this.config = {
+      headers: config.headers ?? (() => ({})),
+      timeout: config.timeout ?? 30_000,
+    };
+  }
+
+  private createAbortController(timeout: number): AbortController {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), timeout);
+    return controller;
+  }
+
+  private interpolatePathParams(path: string, params: Record<string, string | number>): string {
+    return path.replace(/:([a-zA-Z][a-zA-Z0-9]*)/g, (_, key) => {
+      const value = params[key];
+      if (value === undefined) {
+        throw new Error(`Missing required path parameter: ${key}`);
+      }
+      return encodeURIComponent(String(value));
+    });
+  }
+
+  private buildUrl(
+    path: string,
+    pathParams?: Record<string, string | number>,
+    queryParams?: Record<string, string | number | boolean>
+  ): string {
+    const interpolatedPath = pathParams ? this.interpolatePathParams(path, pathParams) : path;
+    const url = new URL(`${this.baseURL}${interpolatedPath}`);
+
+    if (queryParams) {
+      for (const key in queryParams) {
+        const value = queryParams[key];
+        if (value !== undefined) {
+          url.searchParams.append(key, String(value));
+        }
+      }
+    }
+
+    return url.toString();
+  }
+
+  private async parseResponse<T>(response: Response, schema?: z.ZodType<T>): Promise<HttpResult<T>> {
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      return {
+        success: false,
+        error: {
+          type: 'response',
+          message: errorData?.message || errorData?.error?.message,
+          status: response.status,
+          data: errorData,
+        },
+      };
+    }
+
+    try {
+      const contentType = response.headers.get('content-type');
+      const data = contentType?.includes('application/json') ? await response.json() : await response.text();
+
+      if (schema) {
+        const result = schema.safeParse(data);
+        if (!result.success) {
+          return {
+            success: false,
+            error: {
+              type: 'validation',
+              message: result.error.issues[0].message,
+              errors: result.error,
+            },
+          };
+        }
+        return { success: true, data: result.data };
+      }
+
+      return { success: true, data: data as T };
+    } catch {
+      return {
+        success: false,
+        error: {
+          type: 'parse',
+          message: 'Failed to parse response',
+        },
+      };
+    }
+  }
+
+  /**
+   * Make an HTTP request
+   * @template T The expected response data type
+   * @param method - HTTP method (GET, POST, etc.)
+   * @param path - URL path relative to the base URL
+   * @param data - Request body data
+   * @param config - Additional request configuration
+   * @returns A promise that resolves to an HttpResult
+   */
+  async request<T>(
+    method: string,
+    path: string,
+    data?: unknown,
+    config?: RequestConfig<T> & { params?: Record<string, string | number> }
+  ): Promise<HttpResult<T>> {
+    const controller = this.createAbortController(config?.timeout ?? this.config.timeout);
+
+    // Create request details for headers function
+    const requestDetails: RequestDetails = {
+      method,
+      path,
+      data,
+      params: config?.params,
+      query: config?.search,
+    };
+
+    // Build headers with request context
+    const headers = new Headers({
+      'Content-Type': 'application/json',
+      ...this.config.headers?.(requestDetails),
+      ...config?.headers,
+    });
+
+    let body: string | FormData | undefined;
+
+    if (config?.formData) {
+      body = config.formData;
+      headers.delete('Content-Type');
+    } else if (data) {
+      body = JSON.stringify(data);
+    }
+
+    try {
+      const response = await fetch(this.buildUrl(path, config?.params, config?.search), {
+        method,
+        headers,
+        body,
+        signal: controller.signal,
+      });
+
+      return this.parseResponse<T>(response, config?.schema);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return {
+          success: false,
+          error: { type: 'timeout', message: 'Request timed out' },
+        };
+      }
+
+      return {
+        success: false,
+        error: { type: 'network', message: 'Network request failed' },
+      };
+    }
+  }
+
+  /**
+   * Make a GET request
+   * @template T The expected response data type
+   */
+  async get<T>(
+    path: string,
+    config?: RequestConfig<T> & { params?: Record<string, string | number> }
+  ): Promise<HttpResult<T>> {
+    return this.request<T>('GET', path, undefined, config);
+  }
+
+  /**
+   * Make a POST request
+   * @template T The expected response data type
+   */
+  async post<T>(
+    path: string,
+    data?: unknown,
+    config?: RequestConfig<T> & { params?: Record<string, string | number> }
+  ): Promise<HttpResult<T>> {
+    return this.request<T>('POST', path, data, config);
+  }
+
+  /**
+   * Make a PUT request
+   * @template T The expected response data type
+   */
+  async put<T>(
+    path: string,
+    data?: unknown,
+    config?: RequestConfig<T> & { params?: Record<string, string | number> }
+  ): Promise<HttpResult<T>> {
+    return this.request<T>('PUT', path, data, config);
+  }
+
+  /**
+   * Make a DELETE request
+   * @template T The expected response data type
+   */
+  async delete<T>(
+    path: string,
+    data?: unknown,
+    config?: RequestConfig<T> & { params?: Record<string, string | number> }
+  ): Promise<HttpResult<T>> {
+    return this.request<T>('DELETE', path, data, config);
+  }
+
+  /**
+   * Make a PATCH request
+   * @template T The expected response data type
+   */
+  async patch<T>(
+    path: string,
+    data?: unknown,
+    config?: RequestConfig<T> & { params?: Record<string, string | number> }
+  ): Promise<HttpResult<T>> {
+    return this.request<T>('PATCH', path, data, config);
+  }
+}
