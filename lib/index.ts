@@ -1,5 +1,8 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
+
 import { isStandardSchema } from './schema';
+
+export * as languages from './i18n'
 
 /**
  * Represents the result of an HTTP operation, containing either success data or an error
@@ -181,7 +184,7 @@ export class HttpClient {
             },
           });
         }
-        
+
         return { success: true, data: result.value as T };
       }
 
