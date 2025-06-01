@@ -44,6 +44,9 @@ interface HttpConfig {
   endpoint: string;
   headers?: (details: RequestDetails) => Record<string, string>;
   timeout?: number;
+  errors?: {
+    format?: (error: HttpError) => string
+  }
 }
 
 /**
@@ -89,13 +92,16 @@ interface RequestConfig<T> {
  */
 export class HttpClient {
   private baseURL: string;
-  private config: Required<Pick<HttpConfig, 'timeout' | 'headers'>>;
+  private config: Required<Omit<HttpConfig, 'endpoint'>>;
 
   constructor(config: HttpConfig) {
     this.baseURL = config.endpoint;
     this.config = {
       headers: config.headers ?? (() => ({})),
       timeout: config.timeout ?? 30_000,
+      errors: config.errors ?? {
+        format: (error) => error.message
+      }
     };
   }
 
@@ -135,18 +141,26 @@ export class HttpClient {
     return url.toString();
   }
 
+  private formatError<T>(result: HttpResult<T>): HttpResult<T> {
+    if (!result.success && this.config.errors.format) {
+      result.error.message = this.config.errors.format(result.error)
+    }
+
+    return result
+  }
+
   private async parseResponse<T>(response: Response, schema?: T): Promise<HttpResult<T>> {
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
-      return {
+      return this.formatError({
         success: false,
         error: {
           type: 'response',
           message: errorData?.message || errorData?.error?.message,
           status: response.status,
-          data: errorData,
-        },
-      };
+          data: response,
+        }
+      });
     }
 
     try {
@@ -158,27 +172,28 @@ export class HttpClient {
         if (result instanceof Promise) result = await result
 
         if (result.issues) {
-          return {
+          return this.formatError({
             success: false,
             error: {
               type: 'validation',
               message: result.issues[0].message,
               errors: result.issues,
             },
-          };
+          });
         }
+        
         return { success: true, data: result.value as T };
       }
 
       return { success: true, data: data as T };
     } catch {
-      return {
+      return this.formatError({
         success: false,
         error: {
           type: 'parse',
           message: 'Failed to parse response',
         },
-      };
+      });
     }
   }
 
@@ -235,16 +250,16 @@ export class HttpClient {
       return this.parseResponse<T>(response, config?.schema);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        return {
+        return this.formatError({
           success: false,
           error: { type: 'timeout', message: 'Request timed out' },
-        };
+        });
       }
 
-      return {
+      return this.formatError({
         success: false,
         error: { type: 'network', message: 'Network request failed' },
-      };
+      });
     }
   }
 

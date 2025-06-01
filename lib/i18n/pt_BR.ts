@@ -1,4 +1,4 @@
-import type { HttpError } from ".";
+import type { HttpError } from "..";
 
 /**
  * Default error handler function that formats HttpError into a user-friendly message
