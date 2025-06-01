@@ -21,8 +21,10 @@ export type HttpError =
   | { type: 'validation'; message: string; errors: z.ZodError }
   | { type: 'response'; message: string; status: number; data: unknown };
 
+export type HttpMethods = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | (string & {})
+
 interface RequestDetails {
-  method: string;
+  method: HttpMethods;
   path: string;
   data?: unknown;
   params?: Record<string, string | number>;
@@ -60,6 +62,7 @@ interface RequestConfig<T = unknown> {
   schema?: z.ZodType<T>;
   formData?: FormData;
   search?: Record<string, string | number | boolean>;
+  params?: Record<string, string | number>;
 }
 
 /**
@@ -186,10 +189,10 @@ export class HttpClient {
    * @returns A promise that resolves to an HttpResult
    */
   async request<T>(
-    method: string,
+    method: HttpMethods,
     path: string,
     data?: unknown,
-    config?: RequestConfig<T> & { params?: Record<string, string | number> }
+    config?: RequestConfig<T>
   ): Promise<HttpResult<T>> {
     const controller = this.createAbortController(config?.timeout ?? this.config.timeout);
 
@@ -248,7 +251,7 @@ export class HttpClient {
    */
   async get<T>(
     path: string,
-    config?: RequestConfig<T> & { params?: Record<string, string | number> }
+    config?: RequestConfig<T>
   ): Promise<HttpResult<T>> {
     return this.request<T>('GET', path, undefined, config);
   }
@@ -260,7 +263,7 @@ export class HttpClient {
   async post<T>(
     path: string,
     data?: unknown,
-    config?: RequestConfig<T> & { params?: Record<string, string | number> }
+    config?: RequestConfig<T>
   ): Promise<HttpResult<T>> {
     return this.request<T>('POST', path, data, config);
   }
@@ -272,7 +275,7 @@ export class HttpClient {
   async put<T>(
     path: string,
     data?: unknown,
-    config?: RequestConfig<T> & { params?: Record<string, string | number> }
+    config?: RequestConfig<T>
   ): Promise<HttpResult<T>> {
     return this.request<T>('PUT', path, data, config);
   }
@@ -284,7 +287,7 @@ export class HttpClient {
   async delete<T>(
     path: string,
     data?: unknown,
-    config?: RequestConfig<T> & { params?: Record<string, string | number> }
+    config?: RequestConfig<T>
   ): Promise<HttpResult<T>> {
     return this.request<T>('DELETE', path, data, config);
   }
@@ -296,7 +299,7 @@ export class HttpClient {
   async patch<T>(
     path: string,
     data?: unknown,
-    config?: RequestConfig<T> & { params?: Record<string, string | number> }
+    config?: RequestConfig<T>
   ): Promise<HttpResult<T>> {
     return this.request<T>('PATCH', path, data, config);
   }
