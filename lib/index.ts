@@ -1,4 +1,5 @@
-import type { z } from 'zod';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
+import { isStandardSchema } from './schema';
 
 /**
  * Represents the result of an HTTP operation, containing either success data or an error
@@ -18,7 +19,7 @@ export type HttpError =
   | { type: 'network'; message: string }
   | { type: 'timeout'; message: string }
   | { type: 'parse'; message: string }
-  | { type: 'validation'; message: string; errors: z.ZodError }
+  | { type: 'validation'; message: string; errors: readonly StandardSchemaV1.Issue[] }
   | { type: 'response'; message: string; status: number; data: unknown };
 
 export type HttpMethods = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | (string & {})
@@ -56,10 +57,10 @@ interface HttpConfig {
  * @property {FormData} [formData] - Optional form data to send with the request
  * @property {Record<string, string | number | boolean>} [query] - Optional query parameters
  */
-interface RequestConfig<T = unknown> {
+interface RequestConfig<T> {
   timeout?: number;
   headers?: Record<string, string>;
-  schema?: z.ZodType<T>;
+  schema?: T;
   formData?: FormData;
   search?: Record<string, string | number | boolean>;
   params?: Record<string, string | number>;
@@ -134,7 +135,7 @@ export class HttpClient {
     return url.toString();
   }
 
-  private async parseResponse<T>(response: Response, schema?: z.ZodType<T>): Promise<HttpResult<T>> {
+  private async parseResponse<T>(response: Response, schema?: T): Promise<HttpResult<T>> {
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
       return {
@@ -152,19 +153,21 @@ export class HttpClient {
       const contentType = response.headers.get('content-type');
       const data = contentType?.includes('application/json') ? await response.json() : await response.text();
 
-      if (schema) {
-        const result = schema.safeParse(data);
-        if (!result.success) {
+      if (schema && isStandardSchema(schema)) {
+        let result = schema['~standard'].validate(data);
+        if (result instanceof Promise) result = await result
+
+        if (result.issues) {
           return {
             success: false,
             error: {
               type: 'validation',
-              message: result.error.issues[0].message,
-              errors: result.error,
+              message: result.issues[0].message,
+              errors: result.issues,
             },
           };
         }
-        return { success: true, data: result.data };
+        return { success: true, data: result.value as T };
       }
 
       return { success: true, data: data as T };
