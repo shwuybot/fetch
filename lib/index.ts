@@ -324,4 +324,16 @@ export class HttpClient {
   ): Promise<HttpResult<T>> {
     return this.request<T>('PATCH', path, data, config);
   }
+
+  /**
+   * Throw error when request does not succeed
+   * @example 
+   * ```ts
+   * http.get('/me').then(http.raise) // => throws error if any
+   * ```
+   */
+  unwrap<T>(response: HttpResult<T>): T {
+    if (!response.success) throw new Error(response.error.message)
+    return response.data
+  }
 }
