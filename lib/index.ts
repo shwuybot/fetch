@@ -326,10 +326,11 @@ export class HttpClient {
   }
 
   /**
-   * Throw error when request does not succeed
-   * @example 
+   * Throws an error if the response indicates failure.
+   * Useful for quickly handling errors in promise chains.
+   * @example
    * ```ts
-   * http.get('/me').then(http.raise) // => throws error if any
+   * http.get('/v1/me').then(http.unwrap)
    * ```
    */
   unwrap<T>(response: HttpResult<T>): T {
