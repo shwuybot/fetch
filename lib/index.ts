@@ -67,7 +67,6 @@ interface RequestConfig<T> {
   timeout?: number;
   headers?: Record<string, string>;
   schema?: T;
-  formData?: FormData;
   search?: Record<string, string | number | boolean>;
   params?: Record<string, string | number>;
 }
@@ -97,8 +96,8 @@ export class HttpClient {
   private baseURL: string;
   private config: Required<Omit<HttpConfig, 'endpoint'>>;
 
-  constructor(config: HttpConfig) {
-    this.baseURL = config.endpoint;
+  public constructor(config: HttpConfig) {
+    this.baseURL = config.endpoint[config.endpoint.length - 1] ? config.endpoint.slice(0, config.endpoint.length - 1) : config.endpoint
     this.config = {
       headers: config.headers ?? (() => ({})),
       timeout: config.timeout ?? 30_000,
@@ -124,13 +123,17 @@ export class HttpClient {
     });
   }
 
+  private isExternalUrl(path: string): boolean {
+    return path.startsWith('https://') || path.startsWith('http://');
+  }
+
   private buildUrl(
     path: string,
     pathParams?: Record<string, string | number>,
     queryParams?: Record<string, string | number | boolean>
   ): string {
     const interpolatedPath = pathParams ? this.interpolatePathParams(path, pathParams) : path;
-    const url = new URL(`${this.baseURL}${interpolatedPath}`);
+    const url = this.isExternalUrl(path) ? new URL(interpolatedPath) : new URL(`${this.baseURL}${interpolatedPath}`);
 
     if (queryParams) {
       for (const key in queryParams) {
@@ -144,6 +147,18 @@ export class HttpClient {
     return url.toString();
   }
 
+  private getContentType(data: unknown): string | null {
+    if (data === undefined || data === null) return null
+    
+    if (data instanceof FormData) return null // let browser choose multipart boundary
+    if (data instanceof URLSearchParams) return 'application/x-www-form-urlencoded'
+    if (data instanceof Blob) return data.type || 'application/octet-stream'
+
+    if (typeof data === 'string') return 'text/plain'
+    
+    return 'application/json'
+  }
+  
   private formatError<T>(result: HttpResult<T>): HttpResult<T> {
     if (!result.success && this.config.errors.format) {
       result.error.message = this.config.errors.format(result.error)
@@ -215,33 +230,53 @@ export class HttpClient {
     data?: unknown,
     config?: RequestConfig<T>
   ): Promise<HttpResult<T>> {
+    const isExternal = this.isExternalUrl(path);
     const controller = this.createAbortController(config?.timeout ?? this.config.timeout);
 
-    // Create request details for headers function
-    const requestDetails: RequestDetails = {
-      method,
-      path,
-      data,
-      params: config?.params,
-      query: config?.search,
-    };
+    const headers = new Headers();
 
-    // Build headers with request context
-    const headers = new Headers({
-      'Content-Type': 'application/json',
-      ...this.config.headers?.(requestDetails),
-      ...config?.headers,
-    });
+    if (!isExternal) {
+      const requestDetails: RequestDetails = {
+        method,
+        path,
+        data,
+        params: config?.params,
+        query: config?.search,
+      };
 
-    let body: string | FormData | undefined;
-
-    if (config?.formData) {
-      body = config.formData;
-      headers.delete('Content-Type');
-    } else if (data) {
-      body = JSON.stringify(data);
+      const defaultHeaders = this.config.headers?.(requestDetails) || {};
+      Object.entries(defaultHeaders).forEach(([key, value]) => {
+        headers.set(key, value);
+      });
     }
 
+    if (config?.headers) {
+      Object.entries(config.headers).forEach(([key, value]) => {
+        headers.set(key, value);
+      });
+    }
+
+    const methodAllowsBody = method !== 'GET' && method !== 'HEAD';
+    let body: string | FormData | URLSearchParams | Blob | undefined;
+
+    if (methodAllowsBody && data !== undefined && data !== null) {
+      if (data instanceof FormData) {
+        body = data;
+      } else if (data instanceof URLSearchParams) {
+        body = data;
+      } else if (data instanceof Blob) {
+        body = data;
+      } else if (typeof data === 'string') {
+        body = data;
+      } else {
+        body = JSON.stringify(data);
+      }
+    }
+
+    const contentType = this.getContentType(data);
+    if (body !== undefined && contentType) {
+      headers.set('Content-Type', contentType);
+    }
     try {
       const response = await fetch(this.buildUrl(path, config?.params, config?.search), {
         method,
