@@ -269,23 +269,27 @@ export class HttpClient {
       });
     }
 
-    const contentType = this.getContentType( data);
-    if (contentType) {
-      headers.set('Content-Type', contentType);
-    }
-
+    const methodAllowsBody = method !== 'GET' && method !== 'HEAD';
     let body: string | FormData | URLSearchParams | Blob | undefined;
 
-    if (data instanceof FormData) {
-      body = data;
-    } else if (data instanceof URLSearchParams) {
-      body = data;
-    } else if (data instanceof Blob) {
-      body = data;
-    } else if (typeof data === 'string') {
-      body = data;
+    if (methodAllowsBody && data !== undefined && data !== null) {
+      if (data instanceof FormData) {
+        body = data;
+      } else if (data instanceof URLSearchParams) {
+        body = data;
+      } else if (data instanceof Blob) {
+        body = data;
+      } else if (typeof data === 'string') {
+        body = data;
+      } else {
+        body = JSON.stringify(data);
+      }
     }
-    
+
+    const contentType = this.getContentType(data);
+    if (body !== undefined && contentType) {
+      headers.set('Content-Type', contentType);
+    }
     try {
       const response = await fetch(this.buildUrl(path, config?.params, config?.search), {
         method,
