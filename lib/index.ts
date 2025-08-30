@@ -132,21 +132,8 @@ export class HttpClient {
     pathParams?: Record<string, string | number>,
     queryParams?: Record<string, string | number | boolean>
   ): string {
-    if (this.isExternalUrl(path)) {
-      const url = new URL(path);
-      if (queryParams) {
-        for (const key in queryParams) {
-          const value = queryParams[key];
-          if (value !== undefined) {
-            url.searchParams.append(key, String(value));
-          }
-        }
-      }
-      return url.toString();
-    }
-
     const interpolatedPath = pathParams ? this.interpolatePathParams(path, pathParams) : path;
-    const url = new URL(`${this.baseURL}${interpolatedPath}`);
+    const url = this.isExternalUrl(path) ? new URL(interpolatedPath) : new URL(`${this.baseURL}${interpolatedPath}`);
 
     if (queryParams) {
       for (const key in queryParams) {
@@ -163,7 +150,7 @@ export class HttpClient {
   private getContentType(data: unknown): string | null {
     if (data === undefined || data === null) return null
     
-    if (data instanceof FormData) return null // let browser choose
+    if (data instanceof FormData) return null // let browser choose multipart boundary
     if (data instanceof URLSearchParams) return 'application/x-www-form-urlencoded'
     if (data instanceof Blob) return data.type || 'application/octet-stream'
 
@@ -171,6 +158,7 @@ export class HttpClient {
     
     return 'application/json'
   }
+  
   private formatError<T>(result: HttpResult<T>): HttpResult<T> {
     if (!result.success && this.config.errors.format) {
       result.error.message = this.config.errors.format(result.error)
