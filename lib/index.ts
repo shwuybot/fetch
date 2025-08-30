@@ -161,7 +161,7 @@ export class HttpClient {
   }
 
   private getContentType(data: unknown): string | null {
-    if (!data) return null
+    if (data === undefined || data === null) return null
     
     if (data instanceof FormData) return null // let browser choose
     if (data instanceof URLSearchParams) return 'application/x-www-form-urlencoded'
@@ -171,7 +171,6 @@ export class HttpClient {
     
     return 'application/json'
   }
-
   private formatError<T>(result: HttpResult<T>): HttpResult<T> {
     if (!result.success && this.config.errors.format) {
       result.error.message = this.config.errors.format(result.error)
