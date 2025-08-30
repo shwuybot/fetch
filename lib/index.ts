@@ -67,7 +67,6 @@ interface RequestConfig<T> {
   timeout?: number;
   headers?: Record<string, string>;
   schema?: T;
-  formData?: FormData;
   search?: Record<string, string | number | boolean>;
   params?: Record<string, string | number>;
 }
@@ -124,11 +123,28 @@ export class HttpClient {
     });
   }
 
+  private isExternalUrl(path: string): boolean {
+    return path.startsWith('https://') || path.startsWith('http://');
+  }
+
   private buildUrl(
     path: string,
     pathParams?: Record<string, string | number>,
     queryParams?: Record<string, string | number | boolean>
   ): string {
+    if (this.isExternalUrl(path)) {
+      const url = new URL(path);
+      if (queryParams) {
+        for (const key in queryParams) {
+          const value = queryParams[key];
+          if (value !== undefined) {
+            url.searchParams.append(key, String(value));
+          }
+        }
+      }
+      return url.toString();
+    }
+
     const interpolatedPath = pathParams ? this.interpolatePathParams(path, pathParams) : path;
     const url = new URL(`${this.baseURL}${interpolatedPath}`);
 
@@ -142,6 +158,18 @@ export class HttpClient {
     }
 
     return url.toString();
+  }
+
+  private getContentType(data: unknown): string | null {
+    if (!data) return null
+    
+    if (data instanceof FormData) return null // let browser choose
+    if (data instanceof URLSearchParams) return 'application/x-www-form-urlencoded'
+    if (data instanceof Blob) return data.type || 'application/octet-stream'
+
+    if (typeof data === 'string') return 'text/plain'
+    
+    return 'application/json'
   }
 
   private formatError<T>(result: HttpResult<T>): HttpResult<T> {
@@ -215,33 +243,49 @@ export class HttpClient {
     data?: unknown,
     config?: RequestConfig<T>
   ): Promise<HttpResult<T>> {
+    const isExternal = this.isExternalUrl(path);
     const controller = this.createAbortController(config?.timeout ?? this.config.timeout);
 
-    // Create request details for headers function
-    const requestDetails: RequestDetails = {
-      method,
-      path,
-      data,
-      params: config?.params,
-      query: config?.search,
-    };
+    const headers = new Headers();
 
-    // Build headers with request context
-    const headers = new Headers({
-      'Content-Type': 'application/json',
-      ...this.config.headers?.(requestDetails),
-      ...config?.headers,
-    });
+    if (!isExternal) {
+      const requestDetails: RequestDetails = {
+        method,
+        path,
+        data,
+        params: config?.params,
+        query: config?.search,
+      };
 
-    let body: string | FormData | undefined;
-
-    if (config?.formData) {
-      body = config.formData;
-      headers.delete('Content-Type');
-    } else if (data) {
-      body = JSON.stringify(data);
+      const defaultHeaders = this.config.headers?.(requestDetails) || {};
+      Object.entries(defaultHeaders).forEach(([key, value]) => {
+        headers.set(key, value);
+      });
     }
 
+    if (config?.headers) {
+      Object.entries(config.headers).forEach(([key, value]) => {
+        headers.set(key, value);
+      });
+    }
+
+    const contentType = this.getContentType( data);
+    if (contentType) {
+      headers.set('Content-Type', contentType);
+    }
+
+    let body: string | FormData | URLSearchParams | Blob | undefined;
+
+    if (data instanceof FormData) {
+      body = data;
+    } else if (data instanceof URLSearchParams) {
+      body = data;
+    } else if (data instanceof Blob) {
+      body = data;
+    } else if (typeof data === 'string') {
+      body = data;
+    }
+    
     try {
       const response = await fetch(this.buildUrl(path, config?.params, config?.search), {
         method,
