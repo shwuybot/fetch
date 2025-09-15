@@ -46,6 +46,7 @@ interface RequestDetails {
 interface HttpConfig {
   endpoint: string;
   headers?: (details: RequestDetails) => Record<string, string>;
+  fetch?: typeof fetch,
   timeout?: number;
   errors?: {
     format?: (error: HttpError) => string
@@ -101,6 +102,7 @@ export class HttpClient {
     this.config = {
       headers: config.headers ?? (() => ({})),
       timeout: config.timeout ?? 30_000,
+      fetch: config.fetch ?? fetch,
       errors: config.errors ?? {
         format: (error) => error.message
       }
@@ -278,13 +280,15 @@ export class HttpClient {
       headers.set('Content-Type', contentType);
     }
     try {
-      const response = await fetch(this.buildUrl(path, config?.params, config?.search), {
+      const url = this.buildUrl(path, config?.params, config?.search)
+      const request: RequestInit = {
         method,
         headers,
         body,
         signal: controller.signal,
-      });
-
+      }
+      
+      const response = await this.config.fetch(url, request);
       return this.parseResponse<T>(response, config?.schema);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
