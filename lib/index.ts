@@ -385,7 +385,7 @@ export class HttpClient {
    * const user = await http.get('/v1/me').then(http.unwrapOr({ id: 'anon' }));
    * ```
    */
-  unwrapOr<T>(fallback: T): (response: HttpResult<T>) => T {
-    return (response: HttpResult<T>) => response.success ? response.data : fallback
+  unwrapOr<T, F extends T>(fallback: F): (response: HttpResult<T>) => T {
+    return response => response.success ? response.data : fallback
   }
 }
