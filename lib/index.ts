@@ -376,4 +376,16 @@ export class HttpClient {
     if (!response.success) throw new Error(response.error.message)
     return response.data
   }
+
+  /**
+   * Returns the response data if successful, otherwise falls back to the provided value.
+   * Useful for providing defaults without throwing or branching on errors.
+   * @example
+   * ```ts
+   * const user = await http.get('/v1/me').then(http.unwrapOr({ id: 'anon' }));
+   * ```
+   */
+  unwrapOr<T>(fallback: T): (response: HttpResult<T>) => T {
+    return (response: HttpResult<T>) => response.success ? response.data : fallback
+  }
 }
