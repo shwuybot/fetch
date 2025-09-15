@@ -97,7 +97,7 @@ export class HttpClient {
   private config: Required<Omit<HttpConfig, 'endpoint'>>;
 
   public constructor(config: HttpConfig) {
-    this.baseURL = config.endpoint[config.endpoint.length - 1] ? config.endpoint.slice(0, config.endpoint.length - 1) : config.endpoint
+    this.baseURL = config.endpoint[config.endpoint.length - 1] === '/' ? config.endpoint.slice(0, config.endpoint.length - 1) : config.endpoint
     this.config = {
       headers: config.headers ?? (() => ({})),
       timeout: config.timeout ?? 30_000,
