@@ -102,7 +102,7 @@ export class HttpClient {
     this.config = {
       headers: config.headers ?? (() => ({})),
       timeout: config.timeout ?? 30_000,
-      fetch: config.fetch ?? globalThis.fetch,
+      fetch: config.fetch ?? globalThis.fetch.bind(globalThis),
       errors: config.errors ?? {
         format: (error) => error.message
       }
