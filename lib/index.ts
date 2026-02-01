@@ -395,3 +395,4 @@ export class HttpClient {
   unwrapOr<T, F extends T>(fallback: F): (response: HttpResult<T>) => T {
     return response => response.success ? response.data : fallback
   }
+}
