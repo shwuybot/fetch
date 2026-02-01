@@ -98,7 +98,7 @@ export class HttpClient {
   private config: Required<Omit<HttpConfig, 'endpoint'>>;
 
   public constructor(config: HttpConfig) {
-    this.baseURL = config.endpoint[config.endpoint.length - 1] === '/' ? config.endpoint.slice(0, config.endpoint.length - 1) : config.endpoint
+    this.baseURL = config.endpoint.endsWith('/') ? config.endpoint.slice(0, config.endpoint.length - 1) : config.endpoint
     this.config = {
       headers: config.headers ?? (() => ({})),
       timeout: config.timeout ?? 30_000,
@@ -151,7 +151,6 @@ export class HttpClient {
 
   /**
    * Resolve and return a fully qualified URL by merging path interpolation and query params.
-   * Example: http.resolve('/v1/post/:id/comments', { params: { id: 123 }, search: { term: 'abc' } })
    */
   public resolve(path: string, options?: { params?: Record<string, string | number>; search?: Record<string, string | number | boolean> }): string {
     return this.buildUrl(path, options?.params, options?.search);
