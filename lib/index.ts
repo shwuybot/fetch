@@ -149,6 +149,14 @@ export class HttpClient {
     return url.toString();
   }
 
+  /**
+   * Resolve and return a fully qualified URL by merging path interpolation and query params.
+   * Example: http.resolve('/v1/post/:id/comments', { params: { id: 123 }, search: { term: 'abc' } })
+   */
+  public resolve(path: string, options?: { params?: Record<string, string | number>; search?: Record<string, string | number | boolean> }): string {
+    return this.buildUrl(path, options?.params, options?.search);
+  }
+
   private getContentType(data: unknown): string | null {
     if (data === undefined || data === null) return null
     
@@ -388,4 +396,3 @@ export class HttpClient {
   unwrapOr<T, F extends T>(fallback: F): (response: HttpResult<T>) => T {
     return response => response.success ? response.data : fallback
   }
-}
