@@ -45,11 +45,14 @@ interface RequestConfig<T> {
   params?: Record<string, string | number>;
 }
 
+export type HttpPluginState = Record<string, unknown>
+
 export interface HttpRequestContext<T = unknown> {
   method: HttpMethods;
   path: string;
   data?: unknown;
   config?: RequestConfig<T>;
+  state: HttpPluginState;
   url: string;
   request: RequestInit;
   headers: Headers;
@@ -329,6 +332,7 @@ export class HttpClient {
       path,
       data,
       config,
+      state: {},
       url: this.buildUrl(path, config?.params, config?.search),
       headers,
       request: {

@@ -45,6 +45,7 @@ The plugin system is intentionally small and composable:
 - `onRequest(context)` runs before `fetch`
 - `onResponse(context)` runs after response parsing
 - Plugins run in the order they are provided
+- `context.state` is shared between request/response hooks for per-request plugin state
 - `onResponse` can return a new `HttpResult<T>` to transform/override output
 
 ### Plugin API
@@ -52,6 +53,7 @@ The plugin system is intentionally small and composable:
 ```ts
 import type {
   HttpPlugin,
+  HttpPluginState,
   HttpRequestContext,
   HttpResponseContext,
   HttpResult,
@@ -59,6 +61,8 @@ import type {
 ```
 
 ```ts
+export type HttpPluginState = Record<string, unknown>;
+
 export interface HttpPlugin {
   name?: string;
   onRequest?: <T>(context: HttpRequestContext<T>) => void | Promise<void>;
@@ -86,46 +90,51 @@ const http = new HttpClient({
 });
 ```
 
-### Example 2: Request Timing Plugin
+### Example 2: Request Timing Plugin (using plugin state)
 
 ```ts
 const timingPlugin = {
   name: 'timing',
-  onRequest(context) {
-    (context as any).startedAt = performance.now();
+  onRequest({ state }) {
+    state.startedAt = performance.now();
   },
-  onResponse(context) {
-    const startedAt = (context.request as any).startedAt;
+  onResponse({ request }) {
+    const startedAt = request.state.startedAt;
     if (typeof startedAt === 'number') {
       console.log(
-        `[fetch] ${context.request.method} ${context.request.url} took ${Math.round(performance.now() - startedAt)}ms`
+        `[fetch] ${request.method} ${request.url} took ${Math.round(performance.now() - startedAt)}ms`
       );
     }
   },
 };
 ```
 
-### Example 3: Normalize API Errors
+### Example 3: Plugin Factory (function that builds a plugin)
 
 ```ts
-const normalizeErrorPlugin = {
-  name: 'normalize-error',
-  onResponse({ result }) {
-    if (!result.success && result.error.type === 'response' && result.error.status === 401) {
-      return {
-        success: false,
-        error: {
-          ...result.error,
-          message: 'Your session has expired. Please sign in again.',
-        },
-      };
-    }
-  },
+type RetryMessagePluginOptions = {
+  message: string;
 };
 
-const http = new HttpClient({
-  endpoint: 'https://api.example.com',
-  plugins: [normalizeErrorPlugin],
+function createRetryMessagePlugin(options: RetryMessagePluginOptions) {
+  return {
+    name: 'retry-message',
+    onResponse({ result }) {
+      if (!result.success && result.error.type === 'timeout') {
+        return {
+          success: false,
+          error: {
+            ...result.error,
+            message: options.message,
+          },
+        };
+      }
+    },
+  };
+}
+
+const retryMessagePlugin = createRetryMessagePlugin({
+  message: 'Request timed out — try again in a few seconds.',
 });
 ```
 
@@ -134,7 +143,7 @@ const http = new HttpClient({
 ```ts
 const http = new HttpClient({
   endpoint: 'https://api.example.com',
-  plugins: [authPlugin, timingPlugin, normalizeErrorPlugin],
+  plugins: [authPlugin, timingPlugin, retryMessagePlugin],
 });
 ```
 
