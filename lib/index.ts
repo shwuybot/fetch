@@ -27,12 +27,44 @@ export type HttpError =
 
 export type HttpMethods = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | (string & {})
 
+type MaybePromise<T> = T | Promise<T>
+
 interface RequestDetails {
   method: HttpMethods;
   path: string;
   data?: unknown;
   params?: Record<string, string | number>;
   query?: Record<string, string | number | boolean>;
+}
+
+interface RequestConfig<T> {
+  timeout?: number;
+  headers?: Record<string, string>;
+  schema?: T;
+  search?: Record<string, string | number | boolean>;
+  params?: Record<string, string | number>;
+}
+
+export interface HttpRequestContext<T = unknown> {
+  method: HttpMethods;
+  path: string;
+  data?: unknown;
+  config?: RequestConfig<T>;
+  url: string;
+  request: RequestInit;
+  headers: Headers;
+}
+
+export interface HttpResponseContext<T = unknown> {
+  request: HttpRequestContext<T>;
+  response: Response;
+  result: HttpResult<T>;
+}
+
+export interface HttpPlugin {
+  name?: string;
+  onRequest?: <T = unknown>(context: HttpRequestContext<T>) => MaybePromise<void>;
+  onResponse?: <T = unknown>(context: HttpResponseContext<T>) => MaybePromise<HttpResult<T> | void>;
 }
 
 /**
@@ -48,28 +80,10 @@ interface HttpConfig {
   headers?: (details: RequestDetails) => Record<string, string>;
   fetch?: typeof fetch,
   timeout?: number;
+  plugins?: HttpPlugin[];
   errors?: {
     format?: (error: HttpError) => string
   }
-}
-
-/**
- * Configuration options for individual HTTP requests.
- *
- * @interface RequestConfig
- * @template T - The expected response data type
- * @property {number} [timeout] - Optional request-specific timeout in milliseconds
- * @property {Record<string, string>} [headers] - Optional request-specific headers
- * @property {z.ZodType<T>} [schema] - Optional Zod schema for response validation
- * @property {FormData} [formData] - Optional form data to send with the request
- * @property {Record<string, string | number | boolean>} [query] - Optional query parameters
- */
-interface RequestConfig<T> {
-  timeout?: number;
-  headers?: Record<string, string>;
-  schema?: T;
-  search?: Record<string, string | number | boolean>;
-  params?: Record<string, string | number>;
 }
 
 /**
@@ -102,6 +116,7 @@ export class HttpClient {
     this.config = {
       headers: config.headers ?? (() => ({})),
       timeout: config.timeout ?? 30_000,
+      plugins: config.plugins ?? [],
       fetch: config.fetch ?? globalThis.fetch.bind(globalThis),
       errors: config.errors ?? {
         format: (error) => error.message
@@ -158,22 +173,44 @@ export class HttpClient {
 
   private getContentType(data: unknown): string | null {
     if (data === undefined || data === null) return null
-    
+
     if (data instanceof FormData) return null // let browser choose multipart boundary
     if (data instanceof URLSearchParams) return 'application/x-www-form-urlencoded'
     if (data instanceof Blob) return data.type || 'application/octet-stream'
 
     if (typeof data === 'string') return 'text/plain'
-    
+
     return 'application/json'
   }
-  
+
   private formatError<T>(result: HttpResult<T>): HttpResult<T> {
     if (!result.success && this.config.errors.format) {
       result.error.message = this.config.errors.format(result.error)
     }
 
     return result
+  }
+
+  private async runOnRequestPlugins<T>(context: HttpRequestContext<T>): Promise<void> {
+    for (const plugin of this.config.plugins) {
+      await plugin.onRequest?.(context)
+    }
+  }
+
+  private async runOnResponsePlugins<T>(context: HttpResponseContext<T>): Promise<HttpResult<T>> {
+    let current = context.result
+
+    for (const plugin of this.config.plugins) {
+      const next = await plugin.onResponse?.({
+        request: context.request,
+        response: context.response,
+        result: current,
+      })
+
+      if (next) current = next
+    }
+
+    return current
   }
 
   private async parseResponse<T>(response: Response, schema?: T): Promise<HttpResult<T>> {
@@ -286,17 +323,33 @@ export class HttpClient {
     if (body !== undefined && contentType) {
       headers.set('Content-Type', contentType);
     }
-    try {
-      const url = this.buildUrl(path, config?.params, config?.search)
-      const request: RequestInit = {
+
+    let requestContext: HttpRequestContext<T> = {
+      method,
+      path,
+      data,
+      config,
+      url: this.buildUrl(path, config?.params, config?.search),
+      headers,
+      request: {
         method,
         headers,
         body,
         signal: controller.signal,
       }
-      
-      const response = await this.config.fetch(url, request);
-      return this.parseResponse<T>(response, config?.schema);
+    }
+
+    await this.runOnRequestPlugins(requestContext)
+
+    try {
+      const response = await this.config.fetch(requestContext.url, requestContext.request);
+      const parsed = await this.parseResponse<T>(response, config?.schema);
+
+      return this.runOnResponsePlugins({
+        request: requestContext,
+        response,
+        result: parsed,
+      })
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         return this.formatError({
