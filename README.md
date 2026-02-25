@@ -7,6 +7,7 @@ An elegant fetch wrapper inspired by [`axios`](https://github.com/axios/axios) a
 - ✅ Designed to work well with [**TanStack Query**](https://github.com/TanStack/query)
 - ✅ Response validation with [**StandardSchema**](https://github.com/standard-schema/standard-schema) (Zod, Arktype, ...)  
 - ✅ Typed HTTP responses & error union (`HttpResult<T>`)
+- ✅ Response headers available in every `HttpResult<T>` (`result.headers`)
 - ✅ Built-in timeout and abort controller
 - ✅ Supports `FormData`, URL query (`?query`) and parameters (`/:id`)
 - ✅ Minimal plugin system (`onRequest`, `onResponse`) for modular extensions
@@ -35,7 +36,8 @@ if (!result.success) {
   return console.error(result.error.message);
 }
 
-console.log(result.data.name);
+const requestId = result.headers.get('x-request-id');
+console.log(result.data.name, requestId);
 ```
 
 ## Plugin System
@@ -123,6 +125,7 @@ function createRetryMessagePlugin(options: RetryMessagePluginOptions) {
       if (!result.success && result.error.type === 'timeout') {
         return {
           success: false,
+          headers: result.headers,
           error: {
             ...result.error,
             message: options.message,

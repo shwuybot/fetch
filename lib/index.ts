@@ -8,7 +8,9 @@ export * as languages from './i18n'
  * Represents the result of an HTTP operation, containing either success data or an error
  * @template T The type of the success data
  */
-export type HttpResult<T> = { success: true; data: T } | { success: false; error: HttpError };
+export type HttpResult<T> =
+  | { success: true; data: T; headers: Headers }
+  | { success: false; error: HttpError; headers: Headers | null };
 
 /**
  * Different types of errors that can occur during HTTP requests
@@ -221,6 +223,7 @@ export class HttpClient {
       const errorData = await response.json().catch(() => null);
       return this.formatError({
         success: false,
+        headers: response.headers,
         error: {
           type: 'response',
           message: errorData?.message || errorData?.error?.message,
@@ -241,6 +244,7 @@ export class HttpClient {
         if (result.issues) {
           return this.formatError({
             success: false,
+            headers: response.headers,
             error: {
               type: 'validation',
               message: result.issues[0].message,
@@ -249,13 +253,14 @@ export class HttpClient {
           });
         }
 
-        return { success: true, data: result.value as T };
+        return { success: true, data: result.value as T, headers: response.headers };
       }
 
-      return { success: true, data: data as T };
+      return { success: true, data: data as T, headers: response.headers };
     } catch {
       return this.formatError({
         success: false,
+        headers: response.headers,
         error: {
           type: 'parse',
           message: 'Failed to parse response',
@@ -358,12 +363,14 @@ export class HttpClient {
       if (error instanceof Error && error.name === 'AbortError') {
         return this.formatError({
           success: false,
+          headers: null,
           error: { type: 'timeout', message: 'Request timed out' },
         });
       }
 
       return this.formatError({
         success: false,
+        headers: null,
         error: { type: 'network', message: 'Network request failed' },
       });
     }
